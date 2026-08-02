@@ -5,68 +5,86 @@
 $FIXED_APR = 4.99;
 $FIXED_FEES = 15.00;
 
-$contract_html = "";
+$final_html = "";
 
 // ==========================================
-// APPLICATION LOGIC (Runs when form is submitted)
+// EXACT PYTHON LOGIC TRANSLATED TO PHP
+// ==========================================
+
+function parse_time_to_months($time_str) {
+    $time_clean = strtolower(trim($time_str));
+    if (preg_match('/[\d.]+/', $time_clean, $matches)) {
+        $val = floatval($matches[0]);
+        return (strpos($time_clean, 'y') !== false || strpos($time_clean, 'year') !== false) ? intval($val * 12) : intval($val);
+    }
+    return 12;
+}
+
+function calculate_emi($principal, $months, $annual_rate) {
+    if ($months <= 0 || $principal <= 0) return 0.0;
+    $r = ($annual_rate / 100.0) / 12.0;
+    if ($r == 0) return $principal / $months;
+    return $principal * $r * pow(1 + $r, $months) / (pow(1 + $r, $months) - 1);
+}
+
+function generate_amortization_html($principal, $months, $emi, $annual_rate) {
+    if ($months <= 0 || $principal <= 0) {
+        return "<p><em>No amortization schedule available.</em></p>";
+    }
+
+    $html_parts = [
+        '<table class="standard-table amortization-table">',
+        '<thead><tr>',
+        '<th>Pmt #</th>',
+        '<th>Payment Amount</th>',
+        '<th>Principal Applied</th>',
+        '<th>Interest Applied</th>',
+        '<th>Remaining Balance</th>',
+        '</tr></thead><tbody>'
+    ];
+
+    $monthly_rate = ($annual_rate / 100.0) / 12.0;
+    $balance = $principal;
+
+    for ($i = 1; $i <= $months; $i++) {
+        $interest_pmt = $balance * $monthly_rate;
+        $principal_pmt = $emi - $interest_pmt;
+        $balance -= $principal_pmt;
+        if ($i == $months || $balance < 0) $balance = 0.0;
+
+        $html_parts[] = "<tr>" .
+            "<td>{$i}</td>" .
+            "<td>$" . number_format($emi, 2) . "</td>" .
+            "<td>$" . number_format($principal_pmt, 2) . "</td>" .
+            "<td>$" . number_format($interest_pmt, 2) . "</td>" .
+            "<td>$" . number_format($balance, 2) . "</td>" .
+            "</tr>";
+    }
+    $html_parts[] = '</tbody></table>';
+    return implode("", $html_parts);
+}
+
+// ==========================================
+// HANDLE FORM SUBMISSION
 // ==========================================
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // 1. Get user inputs from the web form
-    $customer_name = htmlspecialchars($_POST['Customer_Name'] ?? '');
-    $amount_raw = floatval($_POST['amount'] ?? 0);
-    $time_raw = htmlspecialchars($_POST['time'] ?? '');
-    $lender_name = htmlspecialchars($_POST['Lender_name'] ?? '');
-    $cfo = htmlspecialchars($_POST['CFO'] ?? '');
-    $phone = htmlspecialchars($_POST['Phone'] ?? '');
+    
+    // Get inputs
+    $customer_name = trim($_POST['Customer_Name'] ?? '');
+    $raw_amount = floatval($_POST['amount'] ?? 0);
+    $raw_time = trim($_POST['time'] ?? '');
+    $lender_name = trim($_POST['Lender_name'] ?? '');
+    $cfo = trim($_POST['CFO'] ?? '');
+    $phone = trim($_POST['Phone'] ?? '');
 
-    // 2. Parse time to months
-    $months = 12;
-    if (preg_match('/[\d.]+/', $time_raw, $matches)) {
-        $val = floatval($matches[0]);
-        $months = (stripos($time_raw, 'y') !== false || stripos($time_raw, 'year') !== false) ? intval($val * 12) : intval($val);
-    }
-    if ($months <= 0) $months = 12; // fallback
+    // Calculations
+    $months = parse_time_to_months($raw_time);
+    $emi_val = calculate_emi($raw_amount, $months, $FIXED_APR);
+    $schedule_html = generate_amortization_html($raw_amount, $months, $emi_val, $FIXED_APR);
 
-    // 3. Calculate EMI
-    $r = ($FIXED_APR / 100.0) / 12.0;
-    $emi = 0.0;
-    if ($months > 0 && $amount_raw > 0) {
-        if ($r == 0) {
-            $emi = $amount_raw / $months;
-        } else {
-            $emi = $amount_raw * $r * pow(1 + $r, $months) / (pow(1 + $r, $months) - 1);
-        }
-    }
-
-    // 4. Generate Dynamic Amortization Table
-    $schedule_html = "";
-    if ($months > 0 && $amount_raw > 0) {
-        $schedule_html = '<table class="standard-table amortization-table"><thead><tr><th>Pmt #</th><th>Payment Amount</th><th>Principal Applied</th><th>Interest Applied</th><th>Remaining Balance</th></tr></thead><tbody>';
-        $balance = $amount_raw;
-        
-        for ($i = 1; $i <= $months; $i++) {
-            $interest_pmt = $balance * $r;
-            $principal_pmt = $emi - $interest_pmt;
-            $balance -= $principal_pmt;
-            if ($i == $months || $balance < 0) $balance = 0.0;
-
-            $schedule_html .= sprintf(
-                "<tr><td>%d</td><td>$%s</td><td>$%s</td><td>$%s</td><td>$%s</td></tr>",
-                $i,
-                number_format($emi, 2),
-                number_format($principal_pmt, 2),
-                number_format($interest_pmt, 2),
-                number_format($balance, 2)
-            );
-        }
-        $schedule_html .= '</tbody></table>';
-    } else {
-        $schedule_html = "<p><em>No amortization schedule available.</em></p>";
-    }
-
-    // 5. The Exact Raw HTML Template from your Python Code
-    // (Using NOWDOC syntax '<<<'HTML' so PHP ignores the $ signs)
-    $raw_template = <<<'HTML'
+    // EXACT HTML TEMPLATE FROM PYTHON CODE
+    // (Using NOWDOC <<<'HTML' so PHP does not accidentally modify the $ variables)
+    $CONTRACT_HTML = <<<'HTML'
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -269,7 +287,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     </style>
 </head>
-<body>
+<body onload="window.print()">
     <!-- FIXED WATERMARK -->
     <div class="watermark">CONFIDENTIAL</div>
 
@@ -437,78 +455,67 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 </html>
 HTML;
 
-    // 6. Map the placeholders to the submitted data
+    // Apply exact replacements just like the Python string replacer
     $replacements = [
         '$Customer_Name' => $customer_name,
-        '$amount' => "$" . number_format($amount_raw, 2),
+        '$amount' => "$" . number_format($raw_amount, 2),
         '$time' => $months . " months",
-        '$EMI' => "$" . number_format($emi, 2),
-        '$rate' => $FIXED_APR . "%",
-        '$Fees' => "$" . number_format($FIXED_FEES, 2),
         '$Lender_name' => $lender_name,
         '$CFO' => $cfo,
         '$Phone' => $phone,
+        '$EMI' => "$" . number_format($emi_val, 2),
+        '$rate' => $FIXED_APR . "%",
+        '$Fees' => "$" . number_format($FIXED_FEES, 2),
         '$Repayment_Schedule' => $schedule_html
     ];
 
-    // 7. Replace the Python placeholders with actual data
-    $contract_html = str_replace(array_keys($replacements), array_values($replacements), $raw_template);
-
-    // 8. Inject the auto-print script so it opens the PDF dialog instantly
-    $contract_html = str_replace('<body>', '<body onload="window.print()">', $contract_html);
+    $final_html = str_replace(array_keys($replacements), array_values($replacements), $CONTRACT_HTML);
 }
 ?>
 
-<!-- ==========================================
-// WEB FORM (Displayed when the user first visits the page)
-// ========================================== -->
-<?php if (empty($contract_html)): ?>
+<?php if (empty($final_html)): ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Executive Contract Generator</title>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #e2e8f0; padding: 40px 20px; color: #334155; }
-        .container { max-width: 550px; margin: auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; }
-        h2 { text-align: center; color: #0f172a; margin-top: 0; margin-bottom: 25px; }
+        body { font-family: sans-serif; background: #e2e8f0; padding: 40px; color: #334155; }
+        .container { max-width: 500px; margin: auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #0f172a; }
         label { font-weight: 600; font-size: 14px; margin-bottom: 6px; display: block; color: #008B74; }
-        input { width: 100%; padding: 12px; margin-bottom: 20px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 15px; font-family: inherit; }
-        input:focus { outline: none; border-color: #008B74; box-shadow: 0 0 0 3px rgba(0, 139, 116, 0.1); }
-        button { width: 100%; background: #008B74; color: white; padding: 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: 700; font-family: inherit; transition: background 0.2s; }
+        input { width: 100%; padding: 12px; margin-bottom: 20px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; }
+        button { width: 100%; background: #008B74; color: white; padding: 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; }
         button:hover { background: #006b5a; }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>Generate Loan Contract</h2>
-        <form method="post" action="">
+        <form method="post">
             <label>Customer Name:</label>
-            <input type="text" name="Customer_Name" placeholder="e.g. John Doe" required>
+            <input type="text" name="Customer_Name" required>
             
             <label>Loan Amount ($):</label>
-            <input type="number" step="0.01" name="amount" placeholder="e.g. 15000" required>
+            <input type="number" step="0.01" name="amount" required>
             
-            <label>Loan Terms (e.g. 12 months or 1 year):</label>
-            <input type="text" name="time" placeholder="e.g. 24 months" required>
+            <label>Loan Terms (Months):</label>
+            <input type="text" name="time" required>
             
             <label>Lender Company Name:</label>
-            <input type="text" name="Lender_name" placeholder="e.g. SECURE LOANS USA" required>
+            <input type="text" name="Lender_name" required>
             
-            <label>Authorized Representative (CFO):</label>
-            <input type="text" name="CFO" placeholder="e.g. Jane Smith" required>
+            <label>Authorized Rep (CFO):</label>
+            <input type="text" name="CFO" required>
             
-            <label>Contact Phone Number:</label>
-            <input type="text" name="Phone" placeholder="e.g. (555) 123-4567" required>
+            <label>Contact Phone:</label>
+            <input type="text" name="Phone" required>
             
-            <button type="submit">Generate & Print PDF</button>
+            <button type="submit">Generate & Save PDF</button>
         </form>
     </div>
 </body>
 </html>
 <?php else: ?>
-    <!-- If the form was submitted, output the final calculated HTML contract -->
-    <?php echo $contract_html; ?>
+    <?php echo $final_html; ?>
 <?php endif; ?>
