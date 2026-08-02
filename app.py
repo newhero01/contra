@@ -22,7 +22,7 @@ OUTPUT_DIR = str(downloads_path / "generated_contracts")
 
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
-
+ 
 # ==========================================
 # EXECUTIVE HTML CONTRACT TEMPLATE
 # ==========================================
